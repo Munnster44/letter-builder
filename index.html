@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Letter Builder App v1.0-PWA</title>
+
+<!-- REQUIRED FOR PWA ON GITHUB -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#003366" />
+
+<style>
+body { font-family: Arial, sans-serif; margin: 20px; }
+.label { margin-top: 10px; font-weight: bold; }
+select, textarea, button { width: 100%; margin-top: 5px; padding: 8px; }
+#printArea { display:none; }
+.print-area { width: 8.5in; margin: auto; padding: 0.5in; }
+.header { text-align: center; margin-bottom: 20px; }
+.footer { text-align: center; position: fixed; bottom: 0.2in; width: 100%; font-size: 12px; }
+@media print {
+  body * { visibility: hidden; }
+  #printArea, #printArea * { visibility: visible; }
+  #printArea { position: absolute; left: 0; top: 0; }
+}
+</style>
+
+<!-- NORMAL SERVICE WORKER REGISTRATION (REQUIRED FOR GITHUB) -->
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js')
+    .then(() => console.log("Service Worker registered"))
+    .catch(err => console.error("Service Worker registration failed:", err));
+}
+</script>
+
+</head>
+<body>
+
+<h1>Letter Builder App v1.0-PWA</h1>
+
+<div class="label">Load Member Excel File:</div>
+<input type="file" id="excelFile" accept=".xlsx" />
+
+<div class="label">Select TO Person:</div>
+<select id="toPerson"></select>
+
+<div class="label">Select FROM Person:</div>
+<select id="fromPerson"></select>
+
+<div class="label">Letter Body (optional):</div>
+<textarea id="letterBody" rows="10"></textarea>
+
+<button onclick="generateLetter()">Generate Letter</button>
+
+<div id="printArea" class="print-area"></div>
+
+
+<!-- INSERT FULL SheetJS (xlsx.full.min.js) HERE -->
+<script src="xlsx.full.min.js"></script>
+<!-- END SheetJS -->
+
+
+<script>
+// Base64 Logo Embedded
+const LOGO = "data:image/jpeg;base64,REPLACE_WITH_YOUR_LOGO_BASE64";
+
+// Member storage
+let members = [];
+
+// Handle Excel load
+document.getElementById('excelFile').addEventListener('change', function(e){
+  const file = e.target.files[0];
+  const reader = new FileReader();
+
+  reader.onload = function(evt){
+    const data = new Uint8Array(evt.target.result);
+    const wb = XLSX.read(data, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    members = XLSX.utils.sheet_to_json(sheet);
+    loadDropdowns();
+  };
+
+  reader.readAsArrayBuffer(file);
+});
+
+// Populate dropdowns
+function loadDropdowns(){
+  const toSel = document.getElementById('toPerson');
+  const fromSel = document.getElementById('fromPerson');
+
+  toSel.innerHTML = '';
+  fromSel.innerHTML = '';
+
+  members.forEach((m,i)=>{
+    const label = `${m.LastName}, ${m.FirstName} — ${m.MemberID}`;
+    toSel.innerHTML += `<option value="${i}">${label}</option>`;
+    fromSel.innerHTML += `<option value="${i}">${label}</option>`;
+  });
+}
+
+// Generate letter
+function generateLetter(){
+  const to = members[document.getElementById('toPerson').value];
+  const from = members[document.getElementById('fromPerson').value];
+  const body = document.getElementById('letterBody').value;
+
+  const dateStr = new Date().toLocaleDateString('en-US', {
+    year:'numeric', month:'long', day:'numeric'
+  });
+
+  const html = `
+    <div class='header'>
+      <img src="${LOGO}" style="height:40px; vertical-align:middle;" />
+      <span style="font-size:20px; margin-left:10px;">CanBoat / NautiSavoir</span>
+    </div>
+
+    <div>${dateStr}</div><br>
+
+    <div>
+      <strong>To:</strong><br>
+      ${to.FirstName} ${to.LastName}<br>
+      ${to.Address1 || ''}<br>
+      ${to.Address2 || ''}<br>
+      ${to.City}, ${to.Province}<br>
+      ${to.Country} ${to.PostalCode}<br>
+      Member ID: ${to.MemberID}<br>
+      Next Payment Date: ${to.NextPaymentDate}<br><br>
+    </div>
+
+    <div>
+      <strong>From:</strong><br>
+      ${from.FirstName} ${from.LastName}<br>
+      ${from.Address1 || ''}<br>
+      ${from.Address2 || ''}<br>
+      ${from.City}, ${from.Province}<br>
+      ${from.Country} ${from.PostalCode}<br>
+      Email: ${from.Email}<br>
+      Home Phone: ${from.HomePhone}<br><br>
+    </div>
+
+    <div>${body.replace(/\\n/g,'<br>')}</div><br>
+
+    <div>
+      Sincerely,<br><br>
+      ${from.FirstName} ${from.LastName}<br>
+      ${from.Email}<br>
+      ${from.HomePhone}
+    </div>
+
+    <div class='footer'>
+      -----------------------------------------------------<br>
+      CanBoat / NautiSavoir — © 2025 Glen Carruthers
+    </div>
+  `;
+
+  const out = document.getElementById('printArea');
+  out.innerHTML = html;
+  out.style.display = 'block';
+  window.print();
+}
+</script>
+
+</body>
+</html>
