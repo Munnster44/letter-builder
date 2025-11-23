@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Letter Builder v2.1-PWA</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<style>
+    body { font-family: Calibri, sans-serif; margin: 30px; background: #f7f7f7; }
+    #appContainer {
+        background: white; padding: 25px; border-radius: 12px;
+        max-width: 900px; margin: auto;
+        box-shadow: 0 0 12px rgba(0,0,0,0.15);
+    }
+    #logo { display:block; margin:auto; height:65px; }
+    h2 { text-align:center; margin-bottom:10px; }
+    label { font-weight:bold; margin-top:12px; display:block; }
+    select, textarea {
+        width:100%; padding:8px; margin-top:5px;
+        border-radius:6px; border:1px solid #888; font-size:15px;
+    }
+    textarea { height:160px; }
+    button {
+        margin-top:18px; padding:12px 22px; border:none;
+        background:#0066cc; color:white; border-radius:6px;
+        font-size:16px; cursor:pointer;
+    }
+    button:hover { background:#004c99; }
+    .footer {
+        margin-top:40px; text-align:center; font-size:13px; color:#666;
+    }
+</style>
+
+<script src="xlsx.full.min.js"></script>
+<script src="jszip.min.js"></script>
+
+</head>
+<body>
+<div id="appContainer">
+
+<img id="logo" src="logo.png" alt="CanBoat NautiSavoir Logo">
+
+<h2>Letter Builder v2.1-PWA</h2>
+
+<label>Select Membership Excel File:</label>
+<input type="file" id="excelFile" accept=".xlsx">
+
+<label>To:</label>
+<select id="toPerson"></select>
+
+<label>From:</label>
+<select id="fromPerson"></select>
+
+<label>Letter Body:</label>
+<textarea id="letterBody" placeholder="Enter letter content here..."></textarea>
+
+<button onclick="generateDOCX()">Generate DOCX Letter</button>
+
+<div class="footer">
+    Letter Builder v2.1-PWA — © 2025 CanBoat / NautiSavoir
+</div>
+
+<script>
+/* SAFETY: Convert any value to safe XML text */
+const X = t => String(t ?? "")
+  .replace(/&/g,"&amp;")
+  .replace(/</g,"&lt;")
+  .replace(/>/g,"&gt;");
+
+let members = [];
+
+/* Load Excel File */
+excelFile.addEventListener("change", e => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type:"array" });
+        members = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        loadDropdowns();
+    };
+    reader.readAsArrayBuffer(e.target.files[0]);
+});
+
+/* Build To/From Lists */
+function loadDropdowns(){
+    toPerson.innerHTML = "";
+    fromPerson.innerHTML = "";
+
+    members.forEach((m,i)=>{
+        let label = `${X(m["Last Name"]||"")}, ${X(m["First Name"]||"")} — ${X(m["Member ID"]||"")}`;
+        toPerson.innerHTML += `<option value="${i}">${label}</option>`;
+        fromPerson.innerHTML += `<option value="${i}">${label}</option>`;
+    });
+}
+
+/* Word paragraph */
+function p(t){ return `<w:p><w:r><w:t>${X(t)}</w:t></w:r></w:p>`; }
+
+/* Address block */
+function addr(m){
+    let a1 = X(m["Address 1"]||"");
+    let a2 = X(m["Address 2"]||"");
+    let merged = a2 ? `${a1}, ${a2}` : a1;
+    return [
+        merged,
+        X((m["City"]||"") + " " + (m["Province"]||"")),
+        X((m["Country"]||"") + " " + (m["Postal Code"]||""))
+    ];
+}
+
+/* Generate DOCX */
+async function generateDOCX(){
+
+    const to = members[toPerson.value];
+    const fr = members[fromPerson.value];
+    const bodyLines = letterBody.value.split("\n").map(X);
+    const dateStr = new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+
+    /* Load logo */
+    const logoBinary = await fetch("logo.png").then(r=>r.arrayBuffer());
+
+    /* Build document XML */
+    let documentXML =
+`<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<w:body>
+
+<!-- Centered Logo -->
+<w:p><w:pPr><w:jc w:val="center"/></w:pPr>
+<w:r><w:drawing>
+  <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+             xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"
+             xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+    <wp:extent cx="2000000" cy="700000"/>
+    <a:graphic>
+      <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+        <pic:pic>
+          <pic:blipFill><a:blip r:embed="rIdLogo"/></pic:blipFill>
+          <pic:spPr/>
+        </pic:pic>
+      </a:graphicData>
+    </a:graphic>
+  </wp:inline>
+</w:drawing></w:r></w:p>
+
+${p(dateStr)}
+
+${p("To: " + (to["First Name"]+" "+to["Last Name"]))}
+${addr(to).map(l=>p(l)).join("")}
+${p("Member ID: "+X(to["Member ID"]||""))}
+${p("Next Payment Date: "+X(to["Next Payment Date"]||""))}
+
+${p("From: " + (fr["First Name"]+" "+fr["Last Name"]))}
+${addr(fr).map(l=>p(l)).join("")}
+
+/* BODY GOES HERE */
+${bodyLines.map(l=>p(l)).join("")}
+
+${p("Sincerely,")}
+${p(fr["First Name"]+" "+fr["Last Name"])}
+${p("Email: "+X(fr["Email"]||""))}
+${p("Home Phone: "+X(fr["Home Phone"]||""))}
+
+${p("CanBoat / NautiSavoir — Letter Builder v2.1-PWA")}
+
+</w:body></w:document>`;
+
+    /* Build DOCX ZIP */
+    const zip = new JSZip();
+
+    /* [Content_Types].xml */
+    zip.file("[Content_Types].xml",
+`<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+ <Default Extension="xml" ContentType="application/xml"/>
+ <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+ <Default Extension="png" ContentType="image/png"/>
+
+ <Override PartName="/word/document.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+
+ <Override PartName="/docProps/core.xml"
+   ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+
+ <Override PartName="/docProps/app.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+
+ <Override PartName="/word/styles.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+
+ <Override PartName="/word/settings.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
+
+ <Override PartName="/word/fontTable.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/>
+
+ <Override PartName="/word/theme/theme1.xml"
+   ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+</Types>`);
+
+    /* _rels/.rels */
+    zip.folder("_rels").file(".rels",
+`<?xml version="1.0"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Id="rId1"
+  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+  Target="word/document.xml"/>
+
+ <Relationship Id="rId2"
+  Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
+  Target="docProps/core.xml"/>
+
+ <Relationship Id="rId3"
+  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties"
+  Target="docProps/app.xml"/>
+</Relationships>`);
+
+    /* docProps */
+    zip.folder("docProps").file("core.xml",
+`<?xml version="1.0"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties"
+                   xmlns:dc="http://purl.org/dc/elements/1.1/">
+ <dc:title>Letter Builder v2.1-PWA</dc:title>
+ <dc:creator>CanBoat / NautiSavoir</dc:creator>
+</cp:coreProperties>`);
+
+    zip.folder("docProps").file("app.xml",
+`<?xml version="1.0"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">
+ <Application>Letter Builder v2.1</Application>
+</Properties>`);
+
+    /* word files */
+    zip.folder("word").file("document.xml", documentXML);
+
+    zip.folder("word").file("styles.xml",
+`<?xml version="1.0"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+   <w:name w:val="Normal"/>
+   <w:pPr>
+       <w:spacing w:after="200"/>
+       <w:jc w:val="left"/>
+   </w:pPr>
+   <w:rPr>
+       <w:rFonts w:ascii="Calibri" w:hAnsi="Calibri"/>
+       <w:sz w:val="22"/>
+   </w:rPr>
+ </w:style>
+</w:styles>`);
+
+    zip.folder("word").file("settings.xml",
+`<?xml version="1.0"?>
+<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:defaultTabStop w:val="720"/>
+ <w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720"/>
+</w:settings>`);
+
+    zip.folder("word").file("fontTable.xml",
+`<?xml version="1.0"?>
+<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+ <w:font w:name="Calibri"/>
+</w:fonts>`);
+
+    zip.folder("word").folder("theme").file("theme1.xml",
+`<?xml version="1.0" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="Office Theme"></a:theme>`);
+
+    zip.folder("word/_rels").file("document.xml.rels",
+`<?xml version="1.0"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Id="rIdLogo"
+  Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+  Target="media/logo.png"/>
+</Relationships>`);
+
+    zip.folder("word/media").file("logo.png", logoBinary);
+
+    const blob = await zip.generateAsync({type:"blob"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `Letter_${to["Last Name"]||"Member"}_${new Date().toISOString().slice(0,10)}.docx`;
+    a.click();
+}
+</script>
+
+</div>
+</body>
+</html>
